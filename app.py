@@ -5,6 +5,7 @@ import streamlit as st
 
 from database import authenticate, connect, initialize_database, normalize_state
 from importer import import_cities_from_upload
+from poller import scan_all_endpoints
 
 
 st.set_page_config(page_title="Zoning Tracker", page_icon="🏙️", layout="wide")
@@ -49,6 +50,16 @@ st.title("🏙️ Live US City Zoning Endpoint Dashboard")
 st.caption(f"Logged in role: **{role}**")
 
 if role == "admin":
+    if st.button("Run endpoint scan now", type="primary"):
+        with st.spinner("Checking all monitored endpoints..."):
+            scan_results = scan_all_endpoints()
+        active_count = sum(status == "ACTIVE" for _, status in scan_results)
+        error_count = sum(status == "ERROR" for _, status in scan_results)
+        st.success(
+            f"Scan complete: {active_count} active, {error_count} error(s), "
+            f"{len(scan_results)} endpoint(s) checked."
+        )
+
     with st.expander("Add a city endpoint"):
         with st.form("add_city"):
             city = st.text_input("City")
