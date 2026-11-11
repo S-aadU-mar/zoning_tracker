@@ -5,7 +5,7 @@ import streamlit as st
 
 from database import authenticate, connect, initialize_database, normalize_state
 from importer import import_cities_from_upload
-from poller import scan_all_endpoints
+from poller import get_active_scan_run, start_scan_run
 
 
 st.set_page_config(page_title="Zoning Tracker", page_icon="🏙️", layout="wide")
@@ -50,15 +50,34 @@ st.title("🏙️ Live US City Zoning Endpoint Dashboard")
 st.caption(f"Logged in role: **{role}**")
 
 if role == "admin":
-    if st.button("Run endpoint scan now", type="primary"):
-        with st.spinner("Checking all monitored endpoints..."):
-            scan_results = scan_all_endpoints()
-        active_count = sum(status == "ACTIVE" for _, status in scan_results)
-        error_count = sum(status == "ERROR" for _, status in scan_results)
-        st.success(
-            f"Scan complete: {active_count} active, {error_count} error(s), "
-            f"{len(scan_results)} endpoint(s) checked."
-        )
+    scan_run = get_active_scan_run()
+    if scan_run is None or scan_run.snapshot()[0] != "running":
+        if st.button("Run endpoint scan now", type="primary"):
+            start_scan_run()
+            st.rerun()
+        if scan_run is not None:
+            state, checked_count, total_count, error = scan_run.snapshot()
+            if state == "completed":
+                active_count = sum(status == "ACTIVE" for _, status in scan_run.results)
+                error_count = sum(status == "ERROR" for _, status in scan_run.results)
+                st.success(
+                    f"Scan complete: {active_count} active, {error_count} error(s), "
+                    f"{checked_count} of {total_count} endpoint(s) checked."
+                )
+            elif state == "cancelled":
+                st.warning(
+                    f"Scan terminated after {checked_count} of {total_count} endpoint(s) checked."
+                )
+            elif state == "failed":
+                st.error(f"Scan failed: {error}")
+    else:
+        state, checked_count, total_count, error = scan_run.snapshot()
+        st.info(f"Validation scan in progress: {checked_count} of {total_count} endpoint(s) checked.")
+        if scan_run.stop_event.is_set():
+            st.warning("Termination requested. The current endpoint check will finish first.")
+        elif st.button("Terminate validation run", type="secondary"):
+            scan_run.request_stop()
+            st.rerun()
 
     with st.expander("Add a city endpoint"):
         with st.form("add_city"):
