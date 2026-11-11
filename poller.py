@@ -17,9 +17,9 @@ def scan_endpoint(endpoint: str) -> tuple[str, str | None, str | None]:
         return "ERROR", None, str(error)
 
 
-def main() -> None:
-    initialize_database()
+def scan_all_endpoints() -> list[tuple[str, str]]:
     checked_at = datetime.now(timezone.utc).isoformat()
+    results = []
     with connect() as connection:
         cities = connection.execute("SELECT id, endpoint FROM cities").fetchall()
         for city in cities:
@@ -43,7 +43,14 @@ def main() -> None:
                     """,
                     (status, checked_at, result, city["id"]),
                 )
-            print(f"{city['endpoint']}: {status}")
+            results.append((city["endpoint"], status))
+    return results
+
+
+def main() -> None:
+    initialize_database()
+    for endpoint, status in scan_all_endpoints():
+        print(f"{endpoint}: {status}")
 
 
 if __name__ == "__main__":
