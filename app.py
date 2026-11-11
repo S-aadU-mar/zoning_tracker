@@ -1,46 +1,83 @@
-import streamlit as st
 import sqlite3
 
-st.set_page_config(page_title="Zoning Tracker", layout="wide")
+import pandas as pd
+import streamlit as st
 
-# Employee Login System
+from database import authenticate, connect, initialize_database
+
+
+st.set_page_config(page_title="Zoning Tracker", page_icon="🏙️", layout="wide")
+initialize_database()
+
+
+def load_cities() -> pd.DataFrame:
+    with connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT city, county, state, endpoint, last_edit_date, status,
+                   last_checked_at, last_error
+            FROM cities
+            ORDER BY state, city
+            """
+        ).fetchall()
+    return pd.DataFrame([dict(row) for row in rows])
+
+
 st.sidebar.title("Employee Portal Login")
-user = st.sidebar.text_input("Username")
-pwd = st.sidebar.text_input("Password", type="password")
-
-if st.sidebar.button("Login"):
-    conn = sqlite3.connect("zoning.db")
-    c = conn.cursor()
-    c.execute("SELECT role FROM users WHERE username=? AND password=?", (user, pwd))
-    result = c.fetchone()
-    conn.close()
-    if result:
-        st.session_state["role"] = result[0]
-        st.sidebar.success(f"Logged in as {result[0].upper()}")
-    else:
-        st.sidebar.error("Invalid Username or Password")
-
-st.sidebar.divider()
-if st.sidebar.button("Continue as Demo Viewer"):
-    st.session_state["role"] = "viewer"
-    st.sidebar.info("Demo viewer access enabled")
-
-# Access Guard
 if "role" not in st.session_state:
-    st.info("Please log in or continue as a demo viewer to view the dashboard.")
+    username = st.sidebar.text_input("Username")
+    password = st.sidebar.text_input("Password", type="password")
+    if st.sidebar.button("Login", type="primary"):
+        role = authenticate(username, password)
+        if role:
+            st.session_state["role"] = role
+            st.rerun()
+        st.sidebar.error("Invalid username or password")
+else:
+    st.sidebar.success(f"Logged in as {st.session_state['role'].upper()}")
+    if st.sidebar.button("Log out"):
+        del st.session_state["role"]
+        st.rerun()
+
+if "role" not in st.session_state:
+    st.info("Please enter your employee credentials in the sidebar to view the dashboard.")
     st.stop()
 
-# Main Dashboard Content
+role = st.session_state["role"]
 st.title("🏙️ Live US City Zoning Endpoint Dashboard")
-st.write(f"Logged in Role: **{st.session_state['role']}**")
+st.caption(f"Logged in role: **{role}**")
 
-if st.session_state["role"] == "admin":
-    st.header("Admin Controls")
-    st.button("➕ Add New City Endpoint")
+if role == "admin":
+    with st.expander("Add a city endpoint"):
+        with st.form("add_city"):
+            city = st.text_input("City")
+            county = st.text_input("County")
+            state = st.text_input("State", max_chars=2)
+            endpoint = st.text_input("Endpoint URL")
+            submitted = st.form_submit_button("Add endpoint")
+        if submitted:
+            if not all(value.strip() for value in (city, county, state, endpoint)):
+                st.error("All fields are required.")
+            elif not endpoint.startswith(("http://", "https://")):
+                st.error("Endpoint must start with http:// or https://.")
+            else:
+                try:
+                    with connect() as connection:
+                        connection.execute(
+                            """
+                            INSERT INTO cities (city, county, state, endpoint)
+                            VALUES (?, ?, ?, ?)
+                            """,
+                            (city.strip(), county.strip(), state.strip().upper(), endpoint.strip()),
+                        )
+                    st.success("City endpoint added.")
+                    st.rerun()
+                except sqlite3.IntegrityError:
+                    st.error("That endpoint is already being monitored.")
 
 st.subheader("Monitored Cities & Update Logs")
-# Query database and show cities table
-conn = sqlite3.connect("zoning.db")
-cities = conn.execute("SELECT city, county, state, status FROM cities").fetchall()
-conn.close()
-st.dataframe(cities)
+cities = load_cities()
+if cities.empty:
+    st.info("No city endpoints have been added yet.")
+else:
+    st.dataframe(cities, use_container_width=True, hide_index=True)

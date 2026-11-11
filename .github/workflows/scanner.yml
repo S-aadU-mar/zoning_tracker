@@ -2,19 +2,29 @@ name: Nightly Zoning Endpoint Scanner
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Runs automatically every night at midnight UTC
-  workflow_dispatch: # Allows manual trigger anytime
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.12"
       - name: Install dependencies
-        run: pip install requests
-      - name: Run Endpoint Checker
+        run: python -m pip install --disable-pip-version-check requests
+      - name: Run endpoint checker
         run: python poller.py
+      - name: Persist scan results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add zoning.db
+          git diff --cached --quiet || git commit -m "Update zoning endpoint scan results"
+          git push
