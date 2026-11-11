@@ -3,7 +3,8 @@ import sqlite3
 import pandas as pd
 import streamlit as st
 
-from database import authenticate, connect, initialize_database
+from database import authenticate, connect, initialize_database, normalize_state
+from importer import import_cities_from_excel
 
 
 st.set_page_config(page_title="Zoning Tracker", page_icon="🏙️", layout="wide")
@@ -52,7 +53,7 @@ if role == "admin":
         with st.form("add_city"):
             city = st.text_input("City")
             county = st.text_input("County")
-            state = st.text_input("State", max_chars=2)
+            state = st.text_input("State name")
             endpoint = st.text_input("Endpoint URL")
             submitted = st.form_submit_button("Add endpoint")
         if submitted:
@@ -62,18 +63,36 @@ if role == "admin":
                 st.error("Endpoint must start with http:// or https://.")
             else:
                 try:
+                    normalized_state = normalize_state(state)
                     with connect() as connection:
                         connection.execute(
                             """
                             INSERT INTO cities (city, county, state, endpoint)
                             VALUES (?, ?, ?, ?)
                             """,
-                            (city.strip(), county.strip(), state.strip().upper(), endpoint.strip()),
+                            (city.strip(), county.strip(), normalized_state, endpoint.strip()),
                         )
                     st.success("City endpoint added.")
                     st.rerun()
+                except ValueError as error:
+                    st.error(str(error))
                 except sqlite3.IntegrityError:
                     st.error("That endpoint is already being monitored.")
+
+    with st.expander("Import city endpoints from Excel"):
+        st.caption("Required columns: City, County, State, and Endpoint Links. New_Date is optional.")
+        uploaded_file = st.file_uploader("Upload an .xlsx file", type=["xlsx"], key="city_excel")
+        if uploaded_file is not None and st.button("Import endpoints", type="primary"):
+            try:
+                with connect() as connection:
+                    added, errors = import_cities_from_excel(uploaded_file, connection)
+                st.success(f"Imported {added} endpoint(s).")
+                if errors:
+                    st.warning("Some rows were not imported:\n\n" + "\n".join(errors))
+                if added:
+                    st.rerun()
+            except (ValueError, ImportError) as error:
+                st.error(f"Could not import the Excel file: {error}")
 
 st.subheader("Monitored Cities & Update Logs")
 cities = load_cities()

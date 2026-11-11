@@ -5,9 +5,72 @@ from pathlib import Path
 
 DATABASE_PATH = Path(__file__).with_name("zoning.db")
 
+STATE_NAMES = {
+    "al": "Alabama",
+    "ak": "Alaska",
+    "az": "Arizona",
+    "ar": "Arkansas",
+    "ca": "California",
+    "co": "Colorado",
+    "ct": "Connecticut",
+    "de": "Delaware",
+    "fl": "Florida",
+    "ga": "Georgia",
+    "hi": "Hawaii",
+    "id": "Idaho",
+    "il": "Illinois",
+    "in": "Indiana",
+    "ia": "Iowa",
+    "ks": "Kansas",
+    "ky": "Kentucky",
+    "la": "Louisiana",
+    "me": "Maine",
+    "md": "Maryland",
+    "ma": "Massachusetts",
+    "mi": "Michigan",
+    "mn": "Minnesota",
+    "ms": "Mississippi",
+    "mo": "Missouri",
+    "mt": "Montana",
+    "ne": "Nebraska",
+    "nv": "Nevada",
+    "nh": "New Hampshire",
+    "nj": "New Jersey",
+    "nm": "New Mexico",
+    "ny": "New York",
+    "nc": "North Carolina",
+    "nd": "North Dakota",
+    "oh": "Ohio",
+    "ok": "Oklahoma",
+    "or": "Oregon",
+    "pa": "Pennsylvania",
+    "ri": "Rhode Island",
+    "sc": "South Carolina",
+    "sd": "South Dakota",
+    "tn": "Tennessee",
+    "tx": "Texas",
+    "ut": "Utah",
+    "vt": "Vermont",
+    "va": "Virginia",
+    "wa": "Washington",
+    "wv": "West Virginia",
+    "wi": "Wisconsin",
+    "wy": "Wyoming",
+}
+_STATE_NAMES_BY_KEY = {name.casefold(): name for name in STATE_NAMES.values()}
+
 
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def normalize_state(state: str) -> str:
+    value = state.strip().casefold()
+    if value in STATE_NAMES:
+        return STATE_NAMES[value]
+    if value in _STATE_NAMES_BY_KEY:
+        return _STATE_NAMES_BY_KEY[value]
+    raise ValueError(f"Unknown state '{state}'. Use a full US state name or abbreviation.")
 
 
 def connect() -> sqlite3.Connection:
@@ -52,6 +115,17 @@ def initialize_database() -> None:
         ):
             if column not in columns:
                 connection.execute(f"ALTER TABLE cities ADD COLUMN {column} {definition}")
+
+        for row in connection.execute("SELECT id, state FROM cities").fetchall():
+            try:
+                normalized_state = normalize_state(row["state"])
+            except ValueError:
+                continue
+            if normalized_state != row["state"]:
+                connection.execute(
+                    "UPDATE cities SET state = ? WHERE id = ?",
+                    (normalized_state, row["id"]),
+                )
 
         users = (
             ("admin_boss", hash_password("Pass123!"), "admin"),
