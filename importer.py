@@ -16,6 +16,7 @@ _COLUMN_ALIASES = {
         "endpoint_link",
         "endpoint_links",
         "endpoint_url",
+        "tml",
         "url",
     },
     "last_edit_date": {"last_edit_date", "new_date", "updated_date", "date"},
@@ -27,11 +28,21 @@ def _normalized_header(value: object) -> str:
 
 
 def _column_map(dataframe: pd.DataFrame) -> dict[str, str]:
-    normalized = {_normalized_header(column): column for column in dataframe.columns}
+    normalized = [
+        (_normalized_header(column), column)
+        for column in dataframe.columns
+    ]
     missing = []
     result = {}
     for field, aliases in _COLUMN_ALIASES.items():
-        match = next((normalized[alias] for alias in aliases if alias in normalized), None)
+        match = next(
+            (
+                column
+                for header, column in normalized
+                if any(alias in header for alias in aliases)
+            ),
+            None,
+        )
         if match is None and field != "last_edit_date":
             missing.append(field)
         elif match is not None:
