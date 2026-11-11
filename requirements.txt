@@ -4,3 +4,5 @@ openpyxl
 requests
 folium
 streamlit-folium
+dateparser
+pypdf

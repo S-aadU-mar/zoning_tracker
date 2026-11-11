@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from database import authenticate, connect, initialize_database, normalize_state
+from functions import main as validate_data, validate_input_columns
 from importer import import_cities_from_upload
 from poller import scan_all_endpoints
 
@@ -108,6 +109,159 @@ if role == "admin":
                     st.rerun()
             except (ValueError, ImportError) as error:
                 st.error(f"Could not import the file: {error}")
+
+with st.expander("Validate zoning data accuracy"):
+    st.caption(
+        "Upload a zoning CSV to compare endpoint dates and validate Zone_Code_FN "
+        "field names. The uploaded file is processed in this session and is not modified."
+    )
+    validation_file = st.file_uploader(
+        "Upload a CSV file",
+        type=["csv"],
+        key="validation_data_file",
+    )
+    run_validation = st.button(
+        "Run validation",
+        type="primary",
+        use_container_width=True,
+        key="run_validation",
+    )
+
+    if validation_file is not None:
+        try:
+            validation_input = pd.read_csv(validation_file, encoding="utf-8-sig")
+        except (UnicodeDecodeError, pd.errors.ParserError) as error:
+            st.error(f"Could not read this CSV: {error}")
+        else:
+            column_problems = validate_input_columns(validation_input)
+            if column_problems:
+                st.error("This CSV cannot be processed:")
+                for problem in column_problems:
+                    st.error(problem)
+            else:
+                st.info(
+                    f"Loaded **{len(validation_input):,} rows** and "
+                    f"**{len(validation_input.columns):,} columns**."
+                )
+                with st.expander("Preview uploaded data"):
+                    st.dataframe(
+                        validation_input.head(10),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+                if run_validation:
+                    progress_bar = st.progress(0, text="Starting validation...")
+                    progress_status = st.empty()
+
+                    def update_validation_progress(current, total, message):
+                        fraction = current / total if total else 0
+                        progress_bar.progress(
+                            min(fraction, 1.0),
+                            text=message,
+                        )
+                        progress_status.caption(message)
+
+                    try:
+                        with st.spinner("Checking endpoints and comparing values..."):
+                            report = validate_data(
+                                validation_input,
+                                progress=update_validation_progress,
+                            )
+                        progress_bar.progress(1.0, text="Validation complete")
+                        progress_status.success("Validation finished successfully.")
+                        st.session_state["validation_report_df"] = report
+                    except (SystemExit, ValueError, KeyError) as error:
+                        progress_bar.empty()
+                        progress_status.empty()
+                        st.error(str(error))
+
+    validation_report = st.session_state.get("validation_report_df")
+    if validation_report is not None:
+        is_zone = (
+            validation_report["source"]
+            .fillna("")
+            .str.contains("Zone_Code_FN", case=False, regex=False)
+            | validation_report["issue"]
+            .fillna("")
+            .str.contains("Zone_Code_FN", case=False, regex=False)
+            | validation_report["issue"]
+            .fillna("")
+            .str.startswith("Zone name changed:", na=False)
+        )
+        is_change = validation_report["updation status"].eq("Updation")
+        is_review = validation_report["issue"].fillna("").ne("")
+        date_changes = validation_report[is_change & ~is_zone]
+        zone_changes = validation_report[is_change & is_zone]
+        date_reviews = validation_report[is_review & ~is_zone]
+        zone_reviews = validation_report[is_review & is_zone]
+
+        st.subheader("Validation summary")
+        metrics = st.columns(5)
+        metrics[0].metric("Report items", f"{len(validation_report):,}")
+        metrics[1].metric("Date changes", f"{len(date_changes):,}")
+        metrics[2].metric("Zone changes", f"{len(zone_changes):,}")
+        metrics[3].metric("Date reviews", f"{len(date_reviews):,}")
+        metrics[4].metric("Zone reviews", f"{len(zone_reviews):,}")
+        st.download_button(
+            "Download complete report",
+            validation_report.to_csv(index=False).encode("utf-8-sig"),
+            file_name="Report.csv",
+            mime="text/csv",
+            key="download-complete-validation-report",
+        )
+
+        validation_tabs = st.tabs(
+            [
+                f"All results ({len(validation_report)})",
+                f"Date changes ({len(date_changes)})",
+                f"Zone changes ({len(zone_changes)})",
+                f"Date reviews ({len(date_reviews)})",
+                f"Zone reviews ({len(zone_reviews)})",
+            ]
+        )
+
+        def show_validation_report(data, key):
+            if data.empty:
+                st.success("No items in this view.")
+                return
+            st.dataframe(
+                data,
+                column_config={
+                    "issue": st.column_config.TextColumn(
+                        "issue",
+                        width=500,
+                        help="Full issue details for this report item",
+                    ),
+                },
+                use_container_width=True,
+                hide_index=True,
+            )
+            issues = data[data["issue"].fillna("").ne("")]
+            if not issues.empty:
+                with st.expander(f"View full issue details ({len(issues)})"):
+                    for _, row in issues.iterrows():
+                        location = f"CSV line {row['csv_line']} - {row['city']}"
+                        st.markdown(f"**{location}**")
+                        st.write(row["issue"])
+            st.download_button(
+                "Download this view",
+                data.to_csv(index=False).encode("utf-8-sig"),
+                file_name=f"{key}.csv",
+                mime="text/csv",
+                key=f"download-validation-{key}",
+            )
+
+        with validation_tabs[0]:
+            show_validation_report(validation_report, "complete-report")
+        with validation_tabs[1]:
+            show_validation_report(date_changes, "date-changes")
+        with validation_tabs[2]:
+            show_validation_report(zone_changes, "zone-changes")
+        with validation_tabs[3]:
+            show_validation_report(date_reviews, "date-reviews")
+        with validation_tabs[4]:
+            show_validation_report(zone_reviews, "zone-reviews")
 
 st.subheader("Monitored Cities & Update Logs")
 cities = load_cities()
