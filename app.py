@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from database import authenticate, connect, initialize_database, normalize_state
-from importer import import_cities_from_excel
+from importer import import_cities_from_upload
 
 
 st.set_page_config(page_title="Zoning Tracker", page_icon="🏙️", layout="wide")
@@ -79,20 +79,24 @@ if role == "admin":
                 except sqlite3.IntegrityError:
                     st.error("That endpoint is already being monitored.")
 
-    with st.expander("Import city endpoints from Excel"):
+    with st.expander("Import city endpoints from CSV or Excel"):
         st.caption("Required columns: City, County, State, and Endpoint Links. New_Date is optional.")
-        uploaded_file = st.file_uploader("Upload an .xlsx file", type=["xlsx"], key="city_excel")
+        uploaded_file = st.file_uploader(
+            "Upload a .csv or .xlsx file",
+            type=["csv", "xlsx"],
+            key="city_data_file",
+        )
         if uploaded_file is not None and st.button("Import endpoints", type="primary"):
             try:
                 with connect() as connection:
-                    added, errors = import_cities_from_excel(uploaded_file, connection)
+                    added, errors = import_cities_from_upload(uploaded_file, connection)
                 st.success(f"Imported {added} endpoint(s).")
                 if errors:
                     st.warning("Some rows were not imported:\n\n" + "\n".join(errors))
                 if added:
                     st.rerun()
             except (ValueError, ImportError) as error:
-                st.error(f"Could not import the Excel file: {error}")
+                st.error(f"Could not import the file: {error}")
 
 st.subheader("Monitored Cities & Update Logs")
 cities = load_cities()

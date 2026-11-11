@@ -37,7 +37,7 @@ def _column_map(dataframe: pd.DataFrame) -> dict[str, str]:
         elif match is not None:
             result[field] = match
     if missing:
-        raise ValueError(f"Excel sheet is missing required columns: {', '.join(missing)}.")
+        raise ValueError(f"Uploaded file is missing required columns: {', '.join(missing)}.")
     return result
 
 
@@ -47,8 +47,15 @@ def _cell_text(value: object) -> str:
     return str(value).strip()
 
 
-def import_cities_from_excel(uploaded_file: BinaryIO, connection: sqlite3.Connection) -> tuple[int, list[str]]:
-    dataframe = pd.read_excel(uploaded_file)
+def import_cities_from_upload(uploaded_file: BinaryIO, connection: sqlite3.Connection) -> tuple[int, list[str]]:
+    filename = str(getattr(uploaded_file, "name", "")).casefold()
+    if filename.endswith(".csv"):
+        dataframe = pd.read_csv(uploaded_file)
+    elif filename.endswith(".xlsx"):
+        dataframe = pd.read_excel(uploaded_file)
+    else:
+        raise ValueError("Unsupported file type. Upload a CSV or XLSX file.")
+
     columns = _column_map(dataframe)
     added = 0
     errors = []
